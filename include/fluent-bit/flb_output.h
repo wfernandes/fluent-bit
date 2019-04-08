@@ -311,6 +311,7 @@ static FLB_INLINE void output_pre_cb_flush()
     co_switch(th->caller);
 
     /* Continue, we will resume later */
+    printf("about to call cb_flush from output_pre_cb_flush: %p\n", (void *)data);
     out_p->cb_flush(data, bytes, tag, tag_len, i_ins, out_context, config);
 }
 

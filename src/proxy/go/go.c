@@ -40,6 +40,7 @@
  *      - name: shortname of the plugin.
  *      - description: plugin description.
  *      - type: input, output, filter, whatever.
+ *      - proxy: if it is go or not
  *      - flags: optional flags, not used by Go plugins at the moment.
  *
  *     this is done through Go Wrapper:
@@ -55,6 +56,7 @@ struct flbgo_output_plugin {
     void *o_ins;
     int (*cb_init)();
     int (*cb_flush)(void *, size_t, char *);
+    int (*cb_flush_ctx)(void *, void *, size_t, char *);
     int (*cb_exit)(void *);
 };
 /*------------------------EOF------------------------------------------------*/
@@ -74,6 +76,7 @@ int proxy_go_register(struct flb_plugin_proxy *proxy,
      *
      * - FLBPluginInit
      * - FLBPluginFlush
+     * - FLBPluginFlushCtx
      * - FLBPluginExit
      *
      * note: registration callback FLBPluginRegister() is resolved by the
@@ -87,7 +90,9 @@ int proxy_go_register(struct flb_plugin_proxy *proxy,
         return -1;
     }
 
+    // TODO: validate that cb_flush is a thing before segfaulting
     plugin->cb_flush = flb_plugin_proxy_symbol(proxy, "FLBPluginFlush");
+    plugin->cb_flush_ctx = flb_plugin_proxy_symbol(proxy, "FLBPluginFlushCtx");
     plugin->cb_exit  = flb_plugin_proxy_symbol(proxy, "FLBPluginExit");
     plugin->name     = flb_strdup(def->name);
 
@@ -106,6 +111,7 @@ int proxy_go_init(struct flb_plugin_proxy *proxy)
     plugin->api   = proxy->api;
     plugin->o_ins = proxy->instance;
 
+    printf("FLBPluginInit plugin: %p\n", (void *)plugin);
     ret = plugin->cb_init(plugin);
     if (ret <= 0) {
         flb_error("[go proxy]: plugin '%s' failed to initialize",
@@ -117,12 +123,12 @@ int proxy_go_init(struct flb_plugin_proxy *proxy)
     return ret;
 }
 
-int proxy_go_flush(struct flb_plugin_proxy *proxy, void *data, size_t size,
+int proxy_go_flush(struct flb_plugin_proxy_context *ctx, void *data, size_t size,
                    char *tag, int tag_len)
 {
     int ret;
     char *buf;
-    struct flbgo_output_plugin *plugin = proxy->data;
+    struct flbgo_output_plugin *plugin = ctx->proxy->data;
 
     /* temporal buffer for the tag */
     buf = flb_malloc(tag_len + 1);
@@ -134,7 +140,12 @@ int proxy_go_flush(struct flb_plugin_proxy *proxy, void *data, size_t size,
     memcpy(buf, tag, tag_len);
     buf[tag_len] = '\0';
 
-    ret = plugin->cb_flush(data, size, buf);
+    if (plugin->cb_flush_ctx) {
+        ret = plugin->cb_flush_ctx(ctx->remote_context, data, size, buf);
+    }
+    else {
+        ret = plugin->cb_flush(data, size, buf);
+    }
     flb_free(buf);
     return ret;
 }
